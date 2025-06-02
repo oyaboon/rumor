@@ -31,7 +31,7 @@ contract ProxyAccount {
      * @param strategy The address of the strategy contract to call
      * @param data The calldata to send to the strategy contract
      */
-    function executeStrategy(address strategy, bytes calldata data) external onlyOwner {
+    function executeStrategy(address strategy, bytes memory data) public onlyOwner {
         (bool success, ) = strategy.call(data);
         require(success, "ProxyAccount: strategy execution failed");
     }
@@ -43,5 +43,15 @@ contract ProxyAccount {
      */
     function transferToken(address token, uint256 amount) external onlyOwner {
         IERC20(token).transfer(owner, amount);
+    }
+
+    /**
+     * @dev Runs a strategy by encoding execute(uint256) call and executing it
+     * @param strategy The address of the strategy contract to call
+     * @param amount The amount parameter to pass to the execute function
+     */
+    function runStrategy(address strategy, uint256 amount) external onlyOwner {
+        bytes memory callData = abi.encodeWithSignature("execute(uint256)", amount);
+        executeStrategy(strategy, callData);
     }
 } 

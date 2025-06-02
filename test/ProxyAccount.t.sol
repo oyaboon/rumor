@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
 import {ProxyAccount} from "../src/ProxyAccount.sol";
+import {StrategyExecutor} from "../src/StrategyExecutor.sol";
 
 // Mock ERC20 contract for testing
 contract MockERC20 {
@@ -50,9 +51,38 @@ contract MockERC20 {
     }
 }
 
+// Mock contracts for StrategyExecutor dependencies
+contract MockAavePool {
+    function deposit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external {
+        // Mock implementation - just accept the call
+    }
+}
+
+contract MockUniswapRouter {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+
+    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
+        // Mock implementation - return same amount as input (1:1 swap)
+        return params.amountIn;
+    }
+}
+
 contract ProxyAccountTest is Test {
     ProxyAccount public proxyAccount;
     MockERC20 public mockToken;
+    MockERC20 public mockUSDT;
+    MockERC20 public mockUSDC;
+    MockAavePool public mockAavePool;
+    MockUniswapRouter public mockUniswapRouter;
     
     function setUp() public {
         // Deploy ProxyAccount with this test contract as owner
@@ -60,6 +90,14 @@ contract ProxyAccountTest is Test {
         
         // Deploy mock ERC20 token
         mockToken = new MockERC20();
+        
+        // Deploy mock USDT and USDC for strategy testing
+        mockUSDT = new MockERC20();
+        mockUSDC = new MockERC20();
+        
+        // Deploy mock Aave pool and Uniswap router
+        mockAavePool = new MockAavePool();
+        mockUniswapRouter = new MockUniswapRouter();
     }
     
     function testOwnerIsSetCorrectly() public {
@@ -133,5 +171,40 @@ contract ProxyAccountTest is Test {
         // Expect the call to revert
         vm.expectRevert("ProxyAccount: strategy execution failed");
         proxyAccount.executeStrategy(address(mockToken), invalidData);
+    }
+    
+    function testRunStrategy() public {
+        // Deploy StrategyExecutor with mock addresses
+        StrategyExecutor strategyExecutor = new StrategyExecutor(
+            address(proxyAccount),    // proxy
+            address(mockUSDT),        // USDT
+            address(mockUSDC),        // USDC
+            address(mockAavePool),    // Aave pool
+            address(mockUniswapRouter) // Uniswap router
+        );
+        
+        uint256 testAmount = 1000 * 10**6; // 1000 USDT (6 decimals)
+        
+        // Mint USDT tokens to ProxyAccount
+        mockUSDT.mint(address(proxyAccount), testAmount);
+        
+        // Verify ProxyAccount has USDT
+        assertEq(mockUSDT.balanceOf(address(proxyAccount)), testAmount);
+        
+        // Approve the strategy to spend USDT from ProxyAccount
+        // We need to do this via executeStrategy since we can't directly approve from ProxyAccount
+        bytes memory approveData = abi.encodeWithSignature(
+            "approve(address,uint256)", 
+            address(strategyExecutor), 
+            testAmount
+        );
+        proxyAccount.executeStrategy(address(mockUSDT), approveData);
+        
+        // Call runStrategy - this should execute without reverting
+        proxyAccount.runStrategy(address(strategyExecutor), testAmount);
+        
+        // Assert that the function completed successfully (no revert occurred)
+        // We can verify this by checking that the USDT balance changed
+        assertEq(mockUSDT.balanceOf(address(proxyAccount)), 0, "ProxyAccount should have transferred all USDT");
     }
 } 
