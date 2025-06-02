@@ -53,8 +53,55 @@ contract MockERC20 {
 
 // Mock contracts for StrategyExecutor dependencies
 contract MockAavePool {
+    // Track expected withdrawal amounts for each asset
+    mapping(address => uint256) public withdrawalAmounts;
+    // Map underlying assets to their corresponding aTokens
+    mapping(address => address) public underlyingToAToken;
+    
+    function setWithdrawalAmount(address asset, uint256 amount) external {
+        withdrawalAmounts[asset] = amount;
+    }
+    
+    function setATokenMapping(address underlying, address aToken) external {
+        underlyingToAToken[underlying] = aToken;
+    }
+    
     function deposit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external {
         // Mock implementation - just accept the call
+    }
+    
+    function withdraw(address asset, uint256 amount, address to) external returns (uint256) {
+        // Get the corresponding aToken for this underlying asset
+        address aToken = underlyingToAToken[asset];
+        
+        // Get withdrawal amount
+        uint256 withdrawAmount = withdrawalAmounts[asset];
+        
+        if (withdrawAmount > 0 && aToken != address(0)) {
+            // Burn aTokens from the caller (ProxyAccount)
+            // In our mock, we'll transfer aTokens from caller to this contract (simulating burn)
+            MockERC20(aToken).transferFrom(msg.sender, address(this), withdrawAmount);
+            
+            // Mint underlying tokens to recipient
+            MockERC20(asset).mint(to, withdrawAmount);
+            return withdrawAmount;
+        }
+        
+        // Fallback: if no predefined amount, use requested amount
+        uint256 actualAmount;
+        if (amount == type(uint256).max) {
+            actualAmount = 100 * 10**6; // Default fallback
+        } else {
+            actualAmount = amount;
+        }
+        
+        // If aToken mapping exists, burn aTokens
+        if (aToken != address(0)) {
+            MockERC20(aToken).transferFrom(msg.sender, address(this), actualAmount);
+        }
+        
+        MockERC20(asset).mint(to, actualAmount);
+        return actualAmount;
     }
 }
 
@@ -71,7 +118,9 @@ contract MockUniswapRouter {
     }
 
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
-        // Mock implementation - return same amount as input (1:1 swap)
+        // Mock implementation - transfer tokenIn from caller and mint tokenOut to recipient
+        MockERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
+        MockERC20(params.tokenOut).mint(params.recipient, params.amountIn); // 1:1 swap
         return params.amountIn;
     }
 }
@@ -81,23 +130,33 @@ contract ProxyAccountTest is Test {
     MockERC20 public mockToken;
     MockERC20 public mockUSDT;
     MockERC20 public mockUSDC;
+    MockERC20 public mockAUSDT;  // Separate aToken contracts
+    MockERC20 public mockAUSDC;  // Separate aToken contracts
     MockAavePool public mockAavePool;
     MockUniswapRouter public mockUniswapRouter;
     
     function setUp() public {
-        // Deploy ProxyAccount with this test contract as owner
-        proxyAccount = new ProxyAccount(address(this));
-        
-        // Deploy mock ERC20 token
+        // Deploy mock ERC20 tokens
         mockToken = new MockERC20();
-        
-        // Deploy mock USDT and USDC for strategy testing
         mockUSDT = new MockERC20();
         mockUSDC = new MockERC20();
+        mockAUSDT = new MockERC20();  // Separate aUSDT contract
+        mockAUSDC = new MockERC20();  // Separate aUSDC contract
         
         // Deploy mock Aave pool and Uniswap router
         mockAavePool = new MockAavePool();
         mockUniswapRouter = new MockUniswapRouter();
+        
+        // Deploy ProxyAccount with all required constructor parameters
+        proxyAccount = new ProxyAccount(
+            address(this),              // owner
+            address(mockAavePool),      // aavePool
+            address(mockUniswapRouter), // uniswapRouter
+            address(mockUSDT),          // usdt
+            address(mockUSDC),          // usdc
+            address(mockAUSDT),         // aUsdt (separate contract)
+            address(mockAUSDC)          // aUsdc (separate contract)
+        );
     }
     
     function testOwnerIsSetCorrectly() public {
@@ -206,5 +265,48 @@ contract ProxyAccountTest is Test {
         // Assert that the function completed successfully (no revert occurred)
         // We can verify this by checking that the USDT balance changed
         assertEq(mockUSDT.balanceOf(address(proxyAccount)), 0, "ProxyAccount should have transferred all USDT");
+    }
+    
+    function testClaim() public {
+        uint256 aUsdtAmount = 500 * 10**6;  // 500 aUSDT
+        uint256 aUsdcAmount = 300 * 10**6;  // 300 aUSDC
+        
+        // Configure MockAavePool to return specific amounts for each asset
+        mockAavePool.setWithdrawalAmount(address(mockUSDT), aUsdtAmount);
+        mockAavePool.setWithdrawalAmount(address(mockUSDC), aUsdcAmount);
+        
+        // Configure aToken mappings so the pool knows which aTokens to burn
+        mockAavePool.setATokenMapping(address(mockUSDT), address(mockAUSDT));
+        mockAavePool.setATokenMapping(address(mockUSDC), address(mockAUSDC));
+        
+        // Mint aTokens to ProxyAccount (using separate contracts)
+        mockAUSDT.mint(address(proxyAccount), aUsdtAmount);
+        mockAUSDC.mint(address(proxyAccount), aUsdcAmount);
+        
+        // Get initial owner USDT balance
+        uint256 initialOwnerBalance = mockUSDT.balanceOf(address(this));
+        
+        // Call claim function
+        proxyAccount.claim();
+        
+        // After claim, owner should receive:
+        // - aUSDT amount (withdrawn as USDT)
+        // - aUSDC amount (withdrawn as USDC, then swapped to USDT 1:1)
+        uint256 expectedTotal = aUsdtAmount + aUsdcAmount; // 500 + 300 = 800
+        assertEq(mockUSDT.balanceOf(address(this)), initialOwnerBalance + expectedTotal, "Owner should receive all USDT");
+        
+        // Verify ProxyAccount has no aTokens left (they should be burned during withdrawal)
+        assertEq(mockAUSDT.balanceOf(address(proxyAccount)), 0, "ProxyAccount should have no aUSDT left");
+        assertEq(mockAUSDC.balanceOf(address(proxyAccount)), 0, "ProxyAccount should have no aUSDC left");
+    }
+    
+    function testOnlyOwnerCanClaim() public {
+        // Create a different address to test access control
+        address notOwner = address(0x123);
+        
+        // Try to call claim from non-owner address
+        vm.prank(notOwner);
+        vm.expectRevert("ProxyAccount: caller is not the owner");
+        proxyAccount.claim();
     }
 } 
