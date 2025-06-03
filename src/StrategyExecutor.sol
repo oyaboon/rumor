@@ -35,25 +35,35 @@ interface ISwapRouter {
 /**
  * @title StrategyExecutor
  * @dev A contract that executes a strategy involving USDT/USDC splitting, Aave deposits, and Uniswap swaps
+ * Uses Polygon addresses for Aave V3 and Uniswap V3
  */
 contract StrategyExecutor {
     address public proxy;
     
-    IERC20 public immutable usdt;
-    IERC20 public immutable usdc;
-    IPool public immutable aavePool;
-    ISwapRouter public immutable uniswapRouter;
+    // Token addresses (public variables)
+    address public usdt;
+    address public usdc;
+    
+    // Protocol contract addresses (public variables)
+    address public aavePool;
+    address public uniswapRouter;
+    
+    // Internal contract interfaces
+    IERC20 private immutable usdtToken;
+    IERC20 private immutable usdcToken;
+    IPool private immutable aavePoolContract;
+    ISwapRouter private immutable uniswapRouterContract;
     
     // Uniswap V3 fee tier (0.05% = 500)
     uint24 public constant POOL_FEE = 500;
 
     /**
-     * @dev Sets the proxy address and token addresses
+     * @dev Sets the proxy address and protocol addresses
      * @param _proxy The ProxyAccount contract address
-     * @param _usdt The USDT token address
-     * @param _usdc The USDC token address
-     * @param _aavePool The Aave V3 Pool address
-     * @param _uniswapRouter The Uniswap V3 SwapRouter address
+     * @param _usdt The USDT token address (Polygon: 0x3813e82e6f7098b9583FC0F33a962D02018B6803)
+     * @param _usdc The USDC token address (Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174)
+     * @param _aavePool The Aave V3 Pool address (Polygon: 0x5345F03E4B7521c5346F3DdB464c898D5C0A2fB0)
+     * @param _uniswapRouter The Uniswap V3 SwapRouter address (Polygon: 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45)
      */
     constructor(
         address _proxy,
@@ -63,10 +73,16 @@ contract StrategyExecutor {
         address _uniswapRouter
     ) {
         proxy = _proxy;
-        usdt = IERC20(_usdt);
-        usdc = IERC20(_usdc);
-        aavePool = IPool(_aavePool);
-        uniswapRouter = ISwapRouter(_uniswapRouter);
+        usdt = _usdt;
+        usdc = _usdc;
+        aavePool = _aavePool;
+        uniswapRouter = _uniswapRouter;
+        
+        // Initialize immutable contract interfaces
+        usdtToken = IERC20(_usdt);
+        usdcToken = IERC20(_usdc);
+        aavePoolContract = IPool(_aavePool);
+        uniswapRouterContract = ISwapRouter(_uniswapRouter);
     }
 
     /**
@@ -80,22 +96,22 @@ contract StrategyExecutor {
      */
     function execute(uint256 amount) external {
         // Step 1: Transfer USDT from proxy to this contract
-        require(usdt.transferFrom(proxy, address(this), amount), "USDT transfer failed");
+        require(usdtToken.transferFrom(proxy, address(this), amount), "USDT transfer failed");
         
         // Step 2: Split amount into two equal parts
         uint256 halfAmount = amount / 2;
         uint256 remainingAmount = amount - halfAmount; // Handle odd amounts
         
         // Step 3: Approve and deposit half into Aave USDT pool
-        usdt.approve(address(aavePool), halfAmount);
-        aavePool.deposit(address(usdt), halfAmount, proxy, 0);
+        usdtToken.approve(aavePool, halfAmount);
+        aavePoolContract.deposit(usdt, halfAmount, proxy, 0);
         
         // Step 4: Swap remaining USDT to USDC via Uniswap V3
-        usdt.approve(address(uniswapRouter), remainingAmount);
+        usdtToken.approve(uniswapRouter, remainingAmount);
         
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: address(usdt),
-            tokenOut: address(usdc),
+            tokenIn: usdt,
+            tokenOut: usdc,
             fee: POOL_FEE,
             recipient: address(this),
             deadline: block.timestamp + 300, // 5 minutes from now
@@ -104,11 +120,11 @@ contract StrategyExecutor {
             sqrtPriceLimitX96: 0 // No price limit
         });
         
-        uint256 usdcReceived = uniswapRouter.exactInputSingle(params);
+        uint256 usdcReceived = uniswapRouterContract.exactInputSingle(params);
         
         // Step 5: Approve and deposit USDC into Aave USDC pool
-        usdc.approve(address(aavePool), usdcReceived);
-        aavePool.deposit(address(usdc), usdcReceived, proxy, 0);
+        usdcToken.approve(aavePool, usdcReceived);
+        aavePoolContract.deposit(usdc, usdcReceived, proxy, 0);
     }
     
     /**

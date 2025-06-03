@@ -38,43 +38,41 @@ interface ISwapRouter {
 contract ProxyAccount {
     address public owner;
     
-    // Contract addresses
-    address public aavePool;
-    address public uniswapRouter;
+    // Protocol contract addresses (public variables)
     address public usdt;
     address public usdc;
+    address public aavePool;
     address public aUsdt;
     address public aUsdc;
+    address public uniswapRouter;
     
     // Uniswap V3 fee tier (0.05% = 500)
     uint24 public constant POOL_FEE = 500;
 
     /**
-     * @dev Sets the owner of the contract and protocol addresses
-     * @param _owner The address that will own this contract
-     * @param _aavePool The Aave V3 Pool address
-     * @param _uniswapRouter The Uniswap V3 SwapRouter address
-     * @param _usdt The USDT token address
-     * @param _usdc The USDC token address
-     * @param _aUsdt The aUSDT token address
-     * @param _aUsdc The aUSDC token address
+     * @dev Sets the protocol addresses and owner to msg.sender
+     * @param _usdt The USDT token address (Polygon: 0x3813e82e6f7098b9583FC0F33a962D02018B6803)
+     * @param _usdc The USDC token address (Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174)
+     * @param _aavePool The Aave V3 Pool address (Polygon: 0x5345F03E4B7521c5346F3DdB464c898D5C0A2fB0)
+     * @param _aUsdt The aUSDT token address (Polygon: 0x6ab707Aca953eDAeFBc4fD23bA73294241490620)
+     * @param _aUsdc The aUSDC token address (Polygon: 0x625E7708f30cA75bfd92586e17077590C60eb4cD)
+     * @param _uniswapRouter The Uniswap V3 SwapRouter address (Polygon: 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45)
      */
     constructor(
-        address _owner,
-        address _aavePool,
-        address _uniswapRouter,
         address _usdt,
         address _usdc,
+        address _aavePool,
         address _aUsdt,
-        address _aUsdc
+        address _aUsdc,
+        address _uniswapRouter
     ) {
-        owner = _owner;
-        aavePool = _aavePool;
-        uniswapRouter = _uniswapRouter;
+        owner = msg.sender;
         usdt = _usdt;
         usdc = _usdc;
+        aavePool = _aavePool;
         aUsdt = _aUsdt;
         aUsdc = _aUsdc;
+        uniswapRouter = _uniswapRouter;
     }
 
     /**

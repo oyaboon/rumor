@@ -149,13 +149,12 @@ contract ProxyAccountTest is Test {
         
         // Deploy ProxyAccount with all required constructor parameters
         proxyAccount = new ProxyAccount(
-            address(this),              // owner
-            address(mockAavePool),      // aavePool
-            address(mockUniswapRouter), // uniswapRouter
             address(mockUSDT),          // usdt
             address(mockUSDC),          // usdc
+            address(mockAavePool),      // aavePool
             address(mockAUSDT),         // aUsdt (separate contract)
-            address(mockAUSDC)          // aUsdc (separate contract)
+            address(mockAUSDC),         // aUsdc (separate contract)
+            address(mockUniswapRouter)  // uniswapRouter
         );
     }
     
