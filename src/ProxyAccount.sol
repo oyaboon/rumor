@@ -103,6 +103,16 @@ contract ProxyAccount {
     }
 
     /**
+     * @dev Approves ERC20 tokens for spending by another contract
+     * @param token The address of the ERC20 token contract
+     * @param spender The address of the contract to approve
+     * @param amount The amount of tokens to approve
+     */
+    function approveToken(address token, address spender, uint256 amount) external onlyOwner {
+        IERC20(token).approve(spender, amount);
+    }
+
+    /**
      * @dev Runs a strategy by encoding execute(uint256) call and executing it
      * @param strategy The address of the strategy contract to call
      * @param amount The amount parameter to pass to the execute function
