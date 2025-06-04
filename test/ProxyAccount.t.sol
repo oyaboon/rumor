@@ -180,7 +180,7 @@ contract ProxyAccountTest is Test {
         // Note: mainnetProxyAccount and mainnetStrategyExecutor will be deployed in testMainnetForkStrategy
     }
     
-    function testOwnerIsSetCorrectly() public {
+    function testOwnerIsSetCorrectly() public view {
         // Check if the owner is set to address(this)
         assertEq(proxyAccount.owner(), address(this));
     }

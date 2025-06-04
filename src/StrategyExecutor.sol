@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./LendingStrategy.sol";
 
 // Aave V3 IPool interface
 interface IPool {
@@ -37,7 +38,7 @@ interface ISwapRouter {
  * @dev A contract that executes a strategy involving USDT/USDC splitting, Aave deposits, and Uniswap swaps
  * Uses Polygon addresses for Aave V3 and Uniswap V3
  */
-contract StrategyExecutor {
+contract StrategyExecutor is LendingStrategy {
     address public proxy;
     
     // Token addresses (public variables)
@@ -86,6 +87,34 @@ contract StrategyExecutor {
     }
 
     /**
+     * @dev Invest amount of token according to strategy
+     * @param amount The amount of tokens to invest in the strategy
+     */
+    function run(uint256 amount) external override {
+        execute(amount);
+    }
+
+    /**
+     * @dev Convert strategy result back into base token (e.g. USDT)
+     * Withdraws all positions and converts everything back to the base token
+     */
+    function claim() external override {
+        // TODO: Implement claim logic to withdraw from Aave and convert back to USDT
+        // For now, this is a placeholder
+    }
+
+    /**
+     * @dev Return estimated return for given amount and duration (can be a mock)
+     * @param _amount The amount of tokens to calculate yield for
+     * @param _duration The duration in seconds to calculate yield for
+     * @return The estimated yield/return amount
+     */
+    function getExpectedYield(uint256 _amount, uint256 _duration) external pure override returns (uint256) {
+        // Return 0 for now as requested
+        return 0;
+    }
+
+    /**
      * @dev Executes the strategy:
      * 1. Transfers USDT from proxy to this contract
      * 2. Splits into two equal parts
@@ -94,7 +123,7 @@ contract StrategyExecutor {
      * 5. Deposits USDC into Aave USDC pool
      * @param amount The total amount of USDT to process
      */
-    function execute(uint256 amount) external {
+    function execute(uint256 amount) public {
         // Step 1: Transfer USDT from proxy to this contract
         require(usdtToken.transferFrom(proxy, address(this), amount), "USDT transfer failed");
         

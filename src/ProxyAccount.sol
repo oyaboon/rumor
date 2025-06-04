@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./LendingStrategy.sol";
 
 // Papaya interface
 interface IPapaya {
@@ -137,13 +138,46 @@ contract ProxyAccount {
     }
 
     /**
-     * @dev Runs a strategy by encoding execute(uint256) call and executing it
+     * @dev Runs a strategy by calling the LendingStrategy interface
      * @param strategyContract The address of the strategy contract to call
-     * @param amount The amount parameter to pass to the execute function
+     * @param amount The amount parameter to pass to the run function
      */
     function runStrategy(address strategyContract, uint256 amount) external onlyOwner {
-        bytes memory callData = abi.encodeWithSignature("execute(uint256)", amount);
-        executeStrategy(strategyContract, callData);
+        LendingStrategy(strategyContract).run(amount);
+    }
+
+    /**
+     * @dev Runs the default strategy stored in the contract
+     * @param amount The amount parameter to pass to the run function
+     */
+    function runDefaultStrategy(uint256 amount) external onlyOwner {
+        LendingStrategy(strategy).run(amount);
+    }
+
+    /**
+     * @dev Claims from a specific strategy contract
+     * @param strategyContract The address of the strategy contract to claim from
+     */
+    function claimFromStrategy(address strategyContract) external onlyOwner {
+        LendingStrategy(strategyContract).claim();
+    }
+
+    /**
+     * @dev Claims from the default strategy stored in the contract
+     */
+    function claimFromDefaultStrategy() external onlyOwner {
+        LendingStrategy(strategy).claim();
+    }
+
+    /**
+     * @dev Gets expected yield from a strategy
+     * @param strategyContract The address of the strategy contract
+     * @param amount The amount to calculate yield for
+     * @param duration The duration in seconds
+     * @return The expected yield amount
+     */
+    function getExpectedYield(address strategyContract, uint256 amount, uint256 duration) external view returns (uint256) {
+        return LendingStrategy(strategyContract).getExpectedYield(amount, duration);
     }
 
     /**
