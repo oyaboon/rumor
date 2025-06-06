@@ -486,4 +486,60 @@ contract ProxyAccountTest is Test {
         console.log("Fee collected:", feeAfter - feeBefore);
         console.log("Expected fee (1%):", expectedFee);
     }
+
+    function testMetaTxExecuteStrategy() public {
+        console.log("=== Meta-Transaction Test ===");
+        
+        // Fork and deploy
+        vm.createSelectFork("https://polygon-rpc.com");
+        require(block.number > 40000000, "Fork not working properly");
+        
+        uint256 ownerKey = 0x12345;
+        ProxyAccount proxy = new ProxyAccount(
+            vm.addr(ownerKey), address(0), address(0), address(0), 0,
+            POLYGON_USDT, POLYGON_USDC, POLYGON_AAVE_POOL,
+            POLYGON_AUSDT, POLYGON_AUSDC, POLYGON_UNISWAP_ROUTER
+        );
+        
+        StrategyExecutor strategy = new StrategyExecutor(
+            address(proxy), POLYGON_USDT, POLYGON_USDC,
+            POLYGON_AAVE_POOL, POLYGON_UNISWAP_ROUTER
+        );
+        
+        console.log("Deployed ProxyAccount:", address(proxy));
+        console.log("Deployed StrategyExecutor:", address(strategy));
+        
+        // Setup
+        deal(POLYGON_USDT, address(proxy), 100 * 10**6);
+        vm.prank(vm.addr(ownerKey));
+        proxy.approveToken(POLYGON_USDT, address(strategy), 100 * 10**6);
+        console.log("Setup complete - USDT dealt and approved");
+        
+        // Record initial state
+        uint256 nonceBefore = proxy.nonce();
+        uint256 usdtBefore = IERC20(POLYGON_USDT).balanceOf(address(proxy));
+        console.log("Initial nonce:", nonceBefore);
+        console.log("Initial USDT:", usdtBefore);
+        
+        // Create and execute meta-transaction
+        bytes memory data = abi.encodeWithSignature("runStrategy(address,uint256)", address(strategy), 100 * 10**6);
+        bytes32 hash = keccak256(abi.encodePacked(address(proxy), data, nonceBefore));
+        bytes32 msgHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, msgHash);
+        console.log("Meta-transaction signed");
+        
+        proxy.executeMetaTx(data, abi.encodePacked(r, s, v));
+        console.log("Meta-transaction executed!");
+        
+        // Verify results
+        assertEq(proxy.nonce(), nonceBefore + 1, "Nonce should increment");
+        assertLt(IERC20(POLYGON_USDT).balanceOf(address(proxy)), usdtBefore, "USDT should decrease");
+        assertGt(IERC20(POLYGON_AUSDT).balanceOf(address(proxy)), 0, "Should receive aUSDT");
+        
+        console.log("Final nonce:", proxy.nonce());
+        console.log("Final USDT:", IERC20(POLYGON_USDT).balanceOf(address(proxy)));
+        console.log("aUSDT received:", IERC20(POLYGON_AUSDT).balanceOf(address(proxy)));
+        console.log("Meta-transaction test successful!");
+    }
 } 

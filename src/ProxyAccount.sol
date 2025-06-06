@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./LendingStrategy.sol";
 
 // Papaya interface
@@ -44,9 +46,15 @@ interface ISwapRouter {
  * @dev A contract that allows the owner to execute strategies and transfer tokens
  */
 contract ProxyAccount {
+    using ECDSA for bytes32;
+    
     address public owner;
     address public papaya;
     address public strategy;
+    
+    // Meta-transaction support
+    uint256 public nonce;
+    bool private _inMetaTx; // Track if we're executing a meta-transaction
     
     // Fee configuration
     address public feeRecipient;
@@ -110,7 +118,10 @@ contract ProxyAccount {
      * @dev Modifier to restrict access to owner only
      */
     modifier onlyOwner() {
-        require(msg.sender == owner, "ProxyAccount: caller is not the owner");
+        require(
+            msg.sender == owner || (_inMetaTx && msg.sender == address(this)), 
+            "ProxyAccount: caller is not the owner"
+        );
         _;
     }
 
@@ -121,6 +132,25 @@ contract ProxyAccount {
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "ProxyAccount: new owner is the zero address");
         owner = newOwner;
+    }
+
+    /**
+     * @dev Executes a meta-transaction signed by the owner
+     * @param data The calldata to execute
+     * @param signature The signature from the owner
+     */
+    function executeMetaTx(bytes calldata data, bytes calldata signature) external {
+        bytes32 hash = keccak256(abi.encodePacked(address(this), data, nonce));
+        bytes32 messageHash = MessageHashUtils.toEthSignedMessageHash(hash);
+        address signer = ECDSA.recover(messageHash, signature);
+        require(signer == owner, "Invalid signature");
+        nonce++;
+        
+        _inMetaTx = true;
+        (bool success, ) = address(this).call(data);
+        _inMetaTx = false;
+        
+        require(success, "MetaTx execution failed");
     }
 
     /**
