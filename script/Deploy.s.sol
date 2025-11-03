@@ -22,7 +22,7 @@ contract Deploy is Script {
     address constant FEE_RECIPIENT = 0x7bfc84257b6D818c4e49Eeb7B9422569154EE5a6;
     
     // ============ Configuration ============
-    uint256 constant FEE_BPS = 100; // 1%
+    uint256 constant FEE_BPS = 10; // 0.1%
 
     function run() external {
         vm.startBroadcast();
@@ -58,7 +58,7 @@ contract Deploy is Script {
         console.log("Shared StrategyExecutor:", address(sharedStrategy));
         console.log("ProxyFactory:", address(proxyFactory));
         console.log("Fee Recipient:", FEE_RECIPIENT);
-        console.log("Fee Rate: 1%");
+        console.log("Fee Rate: 0.1%");
         console.log("\n=== User Flow ===");
         console.log("1. Users call proxyFactory.createProxy()");
         console.log("2. Users approve USDT to their proxy");

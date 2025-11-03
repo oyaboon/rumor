@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import "@openzeppelin/contracts/utils/Multicall.sol";
 import "./LendingStrategy.sol";
 
 // ============ Interfaces ============
@@ -38,8 +39,9 @@ interface ISwapRouter {
 /**
  * @title ProxyAccount
  * @dev A contract that allows the owner to execute strategies and manage tokens
+ * @dev Inherits from OpenZeppelin's Multicall for batching function calls
  */
-contract ProxyAccount is ReentrancyGuard {
+contract ProxyAccount is ReentrancyGuard, Multicall {
     using ECDSA for bytes32;
     using SafeERC20 for IERC20;
 
@@ -55,7 +57,7 @@ contract ProxyAccount is ReentrancyGuard {
     address public immutable feeRecipient;
     uint256 public immutable feeBps;
 
-    // Protocol addresses (immutable)
+    // Protocol addresses (immutable)A
     address public immutable usdt;
     address public immutable usdc;
     address public immutable aavePool;

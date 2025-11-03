@@ -369,6 +369,300 @@ contract ProxyAccountTest is Test {
         assertEq(mockUSDT.balanceOf(address(proxy2)), 0);
     }
 
+    // ============ OpenZeppelin Multicall Tests ============
+    function testMulticallApproveAndRunStrategy() public {
+        uint256 amount = 100 * 10**6; // 100 USDT
+        mockUSDT.mint(address(proxy), amount);
+        
+        // Check initial state
+        assertEq(mockUSDT.balanceOf(address(proxy)), amount, "Proxy should have initial USDT");
+        assertEq(mockUSDT.allowance(address(proxy), address(sharedStrategy)), 0, "No initial allowance");
+        
+        // Prepare multicall data
+        bytes[] memory calls = new bytes[](2);
+        
+        // Call 1: Approve USDT for StrategyExecutor
+        calls[0] = abi.encodeWithSignature(
+            "approveToken(address,address,uint256)",
+            address(mockUSDT),
+            address(sharedStrategy),
+            amount
+        );
+        
+        // Call 2: Run strategy
+        calls[1] = abi.encodeWithSignature(
+            "runStrategy(address,uint256)",
+            address(0), // Use default strategy
+            amount
+        );
+
+        // Execute multicall
+        bytes[] memory results = proxy.multicall(calls);
+
+        // Verify results
+        assertEq(results.length, 2, "Should return 2 results");
+        
+        // After runStrategy executes, the allowance should be consumed (0) 
+        // because the strategy uses transferFrom to move tokens
+        assertEq(
+            mockUSDT.allowance(address(proxy), address(sharedStrategy)),
+            0,
+            "Allowance should be consumed after strategy execution"
+        );
+        
+        // Verify strategy was executed (USDT should be transferred)
+        assertEq(mockUSDT.balanceOf(address(proxy)), 0, "USDT should be transferred from proxy");
+    }
+
+    function testMulticallApprovalOnly() public {
+        uint256 amount = 100 * 10**6; // 100 USDT
+        mockUSDT.mint(address(proxy), amount);
+        
+        // Prepare multicall data with only approval
+        bytes[] memory calls = new bytes[](1);
+        
+        // Call 1: Only approve USDT for StrategyExecutor
+        calls[0] = abi.encodeWithSignature(
+            "approveToken(address,address,uint256)",
+            address(mockUSDT),
+            address(sharedStrategy),
+            amount
+        );
+
+        // Execute multicall
+        bytes[] memory results = proxy.multicall(calls);
+
+        // Verify results
+        assertEq(results.length, 1, "Should return 1 result");
+        
+        // Verify token approval worked and is preserved (no strategy execution)
+        assertEq(
+            mockUSDT.allowance(address(proxy), address(sharedStrategy)),
+            amount,
+            "USDT should be approved for StrategyExecutor"
+        );
+        
+        // Verify tokens are still in proxy (no transfer)
+        assertEq(mockUSDT.balanceOf(address(proxy)), amount, "USDT should remain in proxy");
+    }
+
+    function testMulticallWithTransferToken() public {
+        uint256 transferAmount = 50 * 10**6; // 50 USDT
+        mockUSDT.mint(address(proxy), transferAmount);
+        
+        // Prepare multicall data
+        bytes[] memory calls = new bytes[](1);
+        
+        // Transfer token to owner
+        calls[0] = abi.encodeWithSignature(
+            "transferToken(address,uint256)",
+            address(mockUSDT),
+            transferAmount
+        );
+
+        uint256 ownerBalanceBefore = mockUSDT.balanceOf(address(this));
+        uint256 proxyBalanceBefore = mockUSDT.balanceOf(address(proxy));
+
+        // Execute multicall
+        bytes[] memory results = proxy.multicall(calls);
+
+        // Verify results
+        assertEq(results.length, 1, "Should return 1 result");
+        
+        // Verify balances changed correctly
+        assertEq(
+            mockUSDT.balanceOf(address(this)),
+            ownerBalanceBefore + transferAmount,
+            "Owner should receive transferred tokens"
+        );
+        assertEq(
+            mockUSDT.balanceOf(address(proxy)),
+            proxyBalanceBefore - transferAmount,
+            "Proxy should have less tokens"
+        );
+    }
+
+    function testMulticallOnlyOwnerCanCall() public {
+        address notOwner = makeAddr("notOwner");
+        
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeWithSignature(
+            "transferToken(address,uint256)",
+            address(mockUSDT),
+            100 * 10**6
+        );
+
+        // Should revert when called by non-owner
+        vm.prank(notOwner);
+        vm.expectRevert("ProxyAccount: caller is not the owner");
+        proxy.multicall(calls);
+    }
+
+    function testMulticallEmptyCallsArray() public {
+        bytes[] memory calls = new bytes[](0);
+
+        // Should work with empty calls array (OpenZeppelin Multicall allows this)
+        bytes[] memory results = proxy.multicall(calls);
+        
+        assertEq(results.length, 0, "Should return empty results array");
+    }
+
+    function testMulticallPreservesContext() public {
+        // Test that msg.sender is preserved through delegateCall
+        uint256 transferAmount = 50 * 10**6;
+        mockUSDT.mint(address(proxy), transferAmount);
+        
+        bytes[] memory calls = new bytes[](1);
+        
+        // This should work because msg.sender should be preserved as owner (address(this))
+        calls[0] = abi.encodeWithSignature(
+            "transferToken(address,uint256)",
+            address(mockUSDT),
+            transferAmount
+        );
+
+        uint256 ownerBalanceBefore = mockUSDT.balanceOf(address(this));
+
+        bytes[] memory results = proxy.multicall(calls);
+
+        // Verify the transfer worked, proving context was preserved
+        assertGt(
+            mockUSDT.balanceOf(address(this)),
+            ownerBalanceBefore,
+            "Owner should have received tokens, proving context preservation"
+        );
+        assertEq(results.length, 1, "Should return 1 result");
+    }
+
+    function testMulticallComplexWorkflow() public {
+        uint256 amount = 200 * 10**6; // 200 USDT
+        uint256 transferAmount = 50 * 10**6; // 50 USDT for transfer
+        mockUSDT.mint(address(proxy), amount + transferAmount); // Total needed
+        
+        // Complex workflow: approve, run strategy, then partially withdraw
+        bytes[] memory calls = new bytes[](3);
+        
+        // Call 1: Approve USDT for StrategyExecutor
+        calls[0] = abi.encodeWithSignature(
+            "approveToken(address,address,uint256)",
+            address(mockUSDT),
+            address(sharedStrategy),
+            amount
+        );
+        
+        // Call 2: Run strategy
+        calls[1] = abi.encodeWithSignature(
+            "runStrategy(address,uint256)",
+            address(0), // Use default strategy
+            amount
+        );
+        
+        // Call 3: Transfer some remaining tokens to owner
+        calls[2] = abi.encodeWithSignature(
+            "transferToken(address,uint256)",
+            address(mockUSDT),
+            transferAmount
+        );
+
+        uint256 ownerBalanceBefore = mockUSDT.balanceOf(address(this));
+        uint256 proxyBalanceBefore = mockUSDT.balanceOf(address(proxy));
+
+        // Execute multicall
+        bytes[] memory results = proxy.multicall(calls);
+
+        // Verify all calls executed
+        assertEq(results.length, 3, "Should return 3 results");
+        
+        // Verify token transfer worked
+        assertEq(
+            mockUSDT.balanceOf(address(this)),
+            ownerBalanceBefore + transferAmount,
+            "Owner should have received 50 USDT"
+        );
+        
+        // Verify strategy executed (amount should be consumed, only transferAmount should remain)
+        assertEq(
+            mockUSDT.balanceOf(address(proxy)),
+            proxyBalanceBefore - amount - transferAmount,
+            "Strategy amount + transfer amount should be deducted from proxy"
+        );
+    }
+
+    function testMulticallRevertOnFailedCall() public {
+        mockUSDT.mint(address(proxy), 100 * 10**6);
+        
+        // Test with a call that should fail
+        bytes[] memory calls = new bytes[](2);
+        
+        // Call 1: Valid call
+        calls[0] = abi.encodeWithSignature(
+            "approveToken(address,address,uint256)",
+            address(mockUSDT),
+            address(sharedStrategy),
+            100 * 10**6
+        );
+        
+        // Call 2: Invalid call - trying to transfer more than balance
+        calls[1] = abi.encodeWithSignature(
+            "transferToken(address,uint256)",
+            address(mockUSDT),
+            type(uint256).max // More than available balance
+        );
+
+        // Should revert because one call fails (OpenZeppelin Multicall reverts if any call fails)
+        vm.expectRevert(); // The exact revert reason will be from the failed transfer
+        proxy.multicall(calls);
+    }
+
+    function testMulticallBatchClaimAndTransfer() public {
+        // Setup for claim test
+        uint256 aUsdtAmount = 100 * 10**6;
+        uint256 aUsdcAmount = 50 * 10**6;
+        
+        _setupMockAaveWithdrawals(aUsdtAmount, aUsdcAmount);
+        mockAUSDT.mint(address(proxy), aUsdtAmount);
+        mockAUSDC.mint(address(proxy), aUsdcAmount);
+        
+        // Add some extra tokens to transfer
+        mockToken.mint(address(proxy), 75 * 10**18);
+        
+        bytes[] memory calls = new bytes[](2);
+        
+        // Call 1: Claim yields
+        calls[0] = abi.encodeWithSignature("claim()");
+        
+        // Call 2: Transfer other tokens
+        calls[1] = abi.encodeWithSignature(
+            "transferToken(address,uint256)",
+            address(mockToken),
+            75 * 10**18
+        );
+
+        uint256 ownerUsdtBefore = mockUSDT.balanceOf(address(this));
+        uint256 ownerTokenBefore = mockToken.balanceOf(address(this));
+
+        // Execute multicall
+        bytes[] memory results = proxy.multicall(calls);
+
+        // Verify both operations worked
+        assertEq(results.length, 2, "Should return 2 results");
+        
+        // Verify claim worked
+        uint256 expectedTotal = aUsdtAmount + aUsdcAmount;
+        assertEq(
+            mockUSDT.balanceOf(address(this)), 
+            ownerUsdtBefore + expectedTotal,
+            "Owner should receive claimed USDT"
+        );
+        
+        // Verify transfer worked
+        assertEq(
+            mockToken.balanceOf(address(this)),
+            ownerTokenBefore + 75 * 10**18,
+            "Owner should receive transferred tokens"
+        );
+    }
+
     // ============ Helper Functions ============
     function _deployMockContracts() internal {
         mockToken = new MockERC20();
